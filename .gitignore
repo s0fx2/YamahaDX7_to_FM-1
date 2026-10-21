@@ -1,0 +1,19 @@
+# DX7 voice data — not part of the source tree.
+# Download banks yourself from
+# https://yamahablackboxes.com/collection/yamaha-dx7-synthesizer/patches/
+*.syx
+*.SYX
+*_voices/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local tool state
+.workbuddy/
+
+# macOS
+.DS_Store
+._*
