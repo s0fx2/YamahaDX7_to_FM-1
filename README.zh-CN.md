@@ -2,8 +2,11 @@
 
 [English](README.md) · **简体中文**
 
+**当前版本 1.1.0**
+
 把 Yamaha DX7 的 32 音色整合包（`.syx`）拆成一个个独立的单音色 `.syx` 文件，
-文件名直接使用音色名 —— 拆完就可以逐个导入 FM1 的第三方固件。
+文件名直接使用音色名 —— 拆完就可以逐个导入 FM1 的第三方固件。也可以用 `--json`
+导出一份 Felucca/Skiff 音色库文件，一次把 32 个音色全部带进去。
 
 ---
 
@@ -22,7 +25,11 @@ FM1 可以演奏 DX7 的音色，但**导入时必须一份文件一个音色**�
 
 两种格式不只是长度不同：整合包里每个音色的参数被「压缩」进 128 字节，几个参数共用同一
 个字节的位；而单音色文件是 155 字节，一个参数一个字节。所以要先用位运算把音色**展开**，
-再重新封成单音色的 SysEx 消息 —— 这就是本工具做的事，一次处理整包 32 个音色。
+再重新封成单音色的 SysEx 消息 —— 这是本工具的默认模式。
+
+还有第二条路：固件的网页编辑器可以导入 `felucca-library` JSON，一个文件里能放很多
+音色。`--json` 就生成这种文件，一个 DX7 音色对应一个 patch，一次动作就能把整包音色
+放进编辑器的音色库。
 
 ## 去哪儿下载 DX7 音色库
 
@@ -30,7 +37,8 @@ DX7 原厂音色合集（ROM 卡带等）可以在这里下载：
 
 **<https://yamahablackboxes.com/collection/yamaha-dx7-synthesizer/patches/>**
 
-下载任意一个 `.syx` 整合包，用 `dx7toFM1.py` 跑一遍，就能得到一个装满单音色文件的文件夹。
+下载任意一个 `.syx` 整合包，用 `dx7toFM1.py` 跑一遍，就能得到一文件夹的单音色文件，
+或者一份完整的 JSON 音色库。
 
 ## 环境要求
 
@@ -39,7 +47,9 @@ Python 3.8 及以上。只用标准库，不需要 `pip install` 任何东西。
 ## 快速开始
 
 ```bash
-python3 dx7toFM1.py rom1a.syx
+python3 dx7toFM1.py rom1a.syx                 # 拆成 32 个 .syx
+python3 dx7toFM1.py rom1a.syx --json          # 导出一份库 JSON
+python3 dx7toFM1.py --version                 # 查看版本号
 ```
 
 ```
@@ -64,13 +74,19 @@ python3 dx7toFM1.py <整合包.syx> [<另一个.syx> ...] [选项]
 
 | 选项 | 说明 |
 |---|---|
-| `-o, --out DIR` | 输出目录（默认 `<输入文件名>_voices`） |
+| `-o, --out DIR` | 输出目录（默认 `<输入文件名>_voices`；JSON 模式下为 JSON 所在目录） |
 | `-n, --numbered` | 文件名前加两位序号：`01_BRASS 1.syx` |
 | `-p, --prefix STR` | 给所有文件名加统一前缀 |
 | `-u, --underscore` | 音色名里的空格换成下划线：`BRASS_1.syx` |
+| `-j, --json [FILE]` | 改为导出 Felucca/Skiff 库 JSON；`FILE` 可省略（默认 `<输入名>-felucca.json`） |
+| `--template FILE` | 用设备自己导出的库 JSON 作为格式模板 |
+| `--kind {library,bank}` | JSON 里 `kind` 字段的值（默认 `library`） |
 | `-l, --list` | 只列出音色名，不写文件 |
 | `-q, --quiet` | 不打印逐个音色的明细 |
+| `--version` | 打印版本号后退出 |
 | `--selftest` | 跑一遍打包/解包回环自检后退出 |
+
+`-n`、`-p`、`-u` 只作用于 `.syx` 拆分模式；`--json` 后面直接写文件名时，只能跟一个输入文件。
 
 例子：
 
@@ -83,6 +99,13 @@ python3 dx7toFM1.py rom1a.syx -o voices -n -u
 
 # 批量拆一整个文件夹里的整合包（每个包一个子目录）
 python3 dx7toFM1.py *.syx -o voices
+
+# 导出 Felucca/Skiff 库 JSON
+python3 dx7toFM1.py rom1a.syx --json
+python3 dx7toFM1.py rom1a.syx --json bank.json --kind bank
+
+# 用设备导出的文件适配另一种固件布局
+python3 dx7toFM1.py rom1a.syx --json --template my-library.json
 
 # 只想看看包里都有什么音色
 python3 dx7toFM1.py rom1a.syx --list
@@ -102,10 +125,42 @@ F0 43 0n 00 01 1B | 155 字节非打包音色数据 | 校验和 | F7
 
 文件名规则：
 
-- 去掉尾部的补位空格（`BRASS   1` → `BRASS 1`），中间的空格保留。
+- 去掉尾部的补位空格、折叠中间空格（`BRASS   1` → `BRASS 1`）。
 - 文件名非法字符（`/ \ : * ? " < > |`）替换成 `_`。
 - 重名自动加后缀：`BRASS 1.syx`、`BRASS 1-2.syx`……
 - 名字全空的音色退化为 `voice_01`、`voice_02`……
+
+## 导出 Felucca/Skiff 库 JSON
+
+`--json` 生成 `felucca-library` version 1 文件。已在真实的 FELUCCA v2.5.1 设备上验证：
+`rom1a.syx` 的 32 个音色导入后声音全部正常，64 个音色的文件也能导入。
+
+每个 DX7 音色对应一个 patch，真正承载音色数据的是 `fm6`：
+
+| 字段 | 取值 |
+|---|---|
+| `name` | 整合包里的音色名（最多 12 个可打印 ASCII） |
+| `engine` / `engineName` | `12` / `"FM6"` |
+| `params` | 长度为 `pCount` 的参数数组；`E0`..`E7` 全为 0（FM6 宏保持中性） |
+| `pattern` / `tags` | `null` / `[]` |
+| `created` / `modified` | 生成时刻的 UTC 时间戳 |
+| `fm6` | **128 字节 DX7 打包音色，整块原样复制** |
+| `slot` | 音色在文件中的 0 基序号 |
+
+`fm6` 就是下面介绍的 128 字节打包格式，已用 `tine-ep.syx` 与设备导入结果逐字节比对
+确认；JSON 模式**不需要** unpack。
+
+这个模式的几点说明：
+
+- `kind` 默认 `library`；`bank` 也能导入，编辑器会自动加 `bank` 标签。导入的是编辑器
+  音色库，要写进设备的用户槽还需要在编辑器里另行操作。
+- 固件版本会改参数布局：内建模板对应 **FELUCCA v2.5.1**（`pCount=148`、`pE0=140`），
+  v2.2 是 `146`/`138`。设备报的布局不同时，先导出一份它自己的库文件，再用
+  `--template` 传进来，工具会采用其中的 `paramLabels`、`pCount`、`pE0`、`firmware`、
+  引擎编号和参数默认值。
+- FM6 的 `PATCH` 选择器（`E7`）保持 0 —— 编辑器自己新建音色时写的也是 0，
+  自带的 `fm6` 数据优先。
+- 输入本来是单音色 `.syx` 也可以，会生成只含 1 个 patch 的库文件。
 
 ## 原理
 
@@ -175,11 +230,14 @@ F0 43 0n 09 20 00 | 4096 字节数据 | 校验和 | F7
 - 把 `tine-ep.syx`（一个已知正常的单音色文件）丢进工具走一遍，输出与原文件逐字节相同，
   连校验和都一样。
 - 从 `rom1a.syx` 还原出的音色名与官方 ROM1A 音色表完全一致。
+- `--json` 输出与设备导出的库文件结构一致，32 个 `fm6` 与源整合包逐字节相同。
+- 1.1.0 拆分出的 `.syx` 与 1.0.0 逐字节相同（回归测试）。
 - `python3 dx7toFM1.py --selftest` 会跑 2000 组随机音色的打包/解包回环。
 
 ## 说明与限制
 
-- 只做单向拆分：把整合包拆成单音色，不支持把单音色重新合并成 32 音色整合包。
+- `.syx` 拆分模式是单向的：不支持把单音色重新合并成 32 音色整合包。
+- JSON 导入是把音色加进编辑器音色库，不会自动批量写入设备的用户槽。
 - 输入本来就是单音色也能处理，会重新封装并按音色名另存，而不是原样复制。
 - 一个文件里前后拼了多个整合包，也能全部拆出来。
 - 校验和不对只报警告，不会中断转换。

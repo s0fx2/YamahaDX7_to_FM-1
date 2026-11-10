@@ -5,6 +5,12 @@
 *.SYX
 *_voices/
 
+# 生成的库文件与设备导出的本地样本（测试用，不入库）
+*-felucca*.json
+felucca-bank-*.json
+/test.json
+/new.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -2,9 +2,12 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
+**Version 1.1.0**
+
 Split a Yamaha DX7 32-voice bank (`.syx`) into individual single-voice `.syx` files,
 each named after the voice it contains, so FM1's third-party firmware can import them
-one by one.
+one by one. Or use `--json` to export a Felucca/Skiff library file that carries all 32
+voices in a single import.
 
 ---
 
@@ -25,8 +28,11 @@ cannot use as-is:
 The two are not just different sizes: in a bank, each voice is bit-packed into 128
 bytes, with several parameters sharing the same byte. A single-voice dump stores one
 parameter per byte in 155 bytes. So a bank has to be *unpacked* and re-wrapped in a
-proper single-voice SysEx message — which is exactly what this tool does, for all 32
-voices in one go.
+proper single-voice SysEx message — that is the default mode of this tool.
+
+There is also a second route: the firmware's web editor imports a `felucca-library`
+JSON file that can hold many patches at once. `--json` writes such a file, one patch per
+DX7 voice, so a whole bank can be brought into the editor's library in one action.
 
 ## Where to get DX7 patches
 
@@ -34,8 +40,8 @@ Original DX7 patch collections (ROM cartridges and more) can be downloaded here:
 
 **<https://yamahablackboxes.com/collection/yamaha-dx7-synthesizer/patches/>**
 
-Grab any `.syx` bank from that collection, run it through `dx7toFM1.py`, and you get a
-folder of individually named voices.
+Grab any `.syx` bank from that collection and run it through `dx7toFM1.py`: you get
+either a folder of individually named voices, or one JSON library file.
 
 ## Requirements
 
@@ -44,7 +50,9 @@ Python 3.8 or newer. Standard library only — no `pip install` needed.
 ## Quick start
 
 ```bash
-python3 dx7toFM1.py rom1a.syx
+python3 dx7toFM1.py rom1a.syx                 # split into 32 .syx files
+python3 dx7toFM1.py rom1a.syx --json          # export one library JSON
+python3 dx7toFM1.py --version                 # show the version
 ```
 
 ```
@@ -69,13 +77,20 @@ python3 dx7toFM1.py <bank.syx> [<bank2.syx> ...] [options]
 
 | Option | Description |
 |---|---|
-| `-o, --out DIR` | Output directory (default: `<input>_voices`) |
+| `-o, --out DIR` | Output directory (default: `<input>_voices`; in JSON mode, directory for the JSON file) |
 | `-n, --numbered` | Prefix filenames with a two-digit index: `01_BRASS 1.syx` |
 | `-p, --prefix STR` | Add a fixed prefix to every filename |
 | `-u, --underscore` | Turn spaces in voice names into `_`: `BRASS_1.syx` |
+| `-j, --json [FILE]` | Export a Felucca/Skiff library JSON instead of `.syx` files; `FILE` is optional (default `<input>-felucca.json`) |
+| `--template FILE` | Use a library JSON exported by your device as the schema template |
+| `--kind {library,bank}` | Value of the JSON `kind` field (default: `library`) |
 | `-l, --list` | Only list the voice names, write no files |
 | `-q, --quiet` | Do not print the per-voice listing |
+| `--version` | Print the program version and exit |
 | `--selftest` | Run the pack/unpack round-trip self-test and exit |
+
+`-n`, `-p` and `-u` only affect the `.syx` splitting mode. A file name given to
+`--json` may only be used with a single input file.
 
 Examples:
 
@@ -88,6 +103,13 @@ python3 dx7toFM1.py rom1a.syx -o voices -n -u
 
 # batch-convert a whole folder of banks (each gets its own subfolder)
 python3 dx7toFM1.py *.syx -o voices
+
+# export a Felucca/Skiff library JSON
+python3 dx7toFM1.py rom1a.syx --json
+python3 dx7toFM1.py rom1a.syx --json bank.json --kind bank
+
+# match a different firmware layout using one of its own exports
+python3 dx7toFM1.py rom1a.syx --json --template my-library.json
 
 # just look at what is inside a bank
 python3 dx7toFM1.py rom1a.syx --list
@@ -107,10 +129,46 @@ F0 43 0n 00 01 1B | 155 bytes of unpacked voice data | checksum | F7
 
 File naming rules:
 
-- Trailing padding spaces are trimmed (`BRASS   1` → `BRASS 1`), inner spaces are kept.
+- Trailing padding spaces are trimmed (`BRASS   1` → `BRASS 1`), inner spaces are collapsed.
 - Characters that are illegal in filenames (`/ \ : * ? " < > |`) become `_`.
 - Duplicate names are de-duplicated with a suffix: `BRASS 1.syx`, `BRASS 1-2.syx`, ….
 - A voice with a blank name falls back to `voice_01`, `voice_02`, ….
+
+## Export a Felucca/Skiff library JSON
+
+`--json` writes a `felucca-library` version 1 file. It was verified against a real
+FELUCCA v2.5.1 device: all 32 voices of `rom1a.syx` imported and played correctly,
+and a 64-patch file imported as well.
+
+Each DX7 voice becomes one patch. The field that actually carries the sound is `fm6`:
+
+| Field | Value |
+|---|---|
+| `name` | Voice name from the bank (max 12 printable ASCII characters) |
+| `engine` / `engineName` | `12` / `"FM6"` |
+| `params` | Parameter array, length `pCount`; `E0`..`E7` are all `0` (neutral FM6 macros) |
+| `pattern` / `tags` | `null` / `[]` |
+| `created` / `modified` | Current UTC timestamp |
+| `fm6` | **The 128 packed DX7 voice bytes, copied verbatim** |
+| `slot` | 0-based index of the voice in the file |
+
+`fm6` is exactly the same 128-byte packed layout described below. It was confirmed
+byte-for-byte by comparing an imported patch with `tine-ep.syx`. No unpacking is
+needed for JSON export.
+
+Notes on this mode:
+
+- `kind` defaults to `library`; `bank` is also accepted and makes the editor add a
+  `bank` tag on import. Voices are imported into the editor's library — writing them
+  into the device's user slots is a separate step in the editor.
+- Firmware layouts change between versions. The built-in template matches
+  **FELUCCA v2.5.1** (`pCount=148`, `pE0=140`); v2.2 used `146`/`138`. If your device
+  reports a different layout, export any library/bank from it and pass that file via
+  `--template` — the tool then adopts its `paramLabels`, `pCount`, `pE0`, `firmware`,
+  engine index and parameter defaults.
+- The FM6 `PATCH` selector (`E7`) is left at `0`. This is what the editor itself writes
+  for a newly added voice; the attached `fm6` data takes precedence.
+- A single-voice `.syx` input works too and produces a one-patch library.
 
 ## How it works
 
@@ -181,12 +239,17 @@ inverse function as a self-check.
 - Feeding `tine-ep.syx` (a known good single-voice dump) through the tool produces a file
   that is byte-identical to the original, checksum included.
 - Voice names recovered from `rom1a.syx` match the official ROM1A voice list.
+- `--json` output is identical in structure to a library file exported from the device;
+  all 32 `fm6` arrays match the source bank byte-for-byte.
+- Splitting with v1.1.0 produces byte-identical `.syx` files to v1.0.0 (regression test).
 - `python3 dx7toFM1.py --selftest` runs 2000 randomised pack/unpack round-trips.
 
 ## Notes and limitations
 
-- One-way only: it splits banks into single voices; it does not merge single voices back
-  into a 32-voice bank.
+- The `.syx` splitting mode is one-way only: it does not merge single voices back into a
+  32-voice bank.
+- JSON import adds patches to the editor's library; it does not automatically write all
+  of them into the device's user slots.
 - Input that is already a single voice is handled too — it gets re-wrapped and renamed
   rather than duplicated.
 - A file containing several banks back to back is split completely.
